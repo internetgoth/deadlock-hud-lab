@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Deadlock HUD Lab Storage Bridge</title>
+</head>
+<body>
+<script>
+(function () {
+  "use strict";
+
+  // This page is only a local-storage bridge for the Deadlock HUD Lab.
+  // It does not send saved layouts to any remote API or analytics service.
+  // The source is public when hosted on GitHub Pages; stored values remain
+  // in this browser origin's localStorage and are not committed to GitHub.
+  var STORAGE_KEY = "hud_lab_layout_v1";
+  var READY_TITLE = "HUD_LAB_BRIDGE_READY:v1";
+  var RESPONSE_PREFIX = "HUD_LAB_RES:";
+  var MAX_VALUE_LENGTH = 100000;
+  var lastHandledId = "";
+
+  function setTitle(value) {
+    document.title = String(value);
+  }
+
+  function respond(id, ok, data, error) {
+    var response = {
+      id: String(id || ""),
+      ok: ok === true
+    };
+
+    if (data !== undefined) response.data = data;
+    if (error) response.error = String(error);
+
+    setTitle(RESPONSE_PREFIX + JSON.stringify(response));
+  }
+
+  function readMessageFromHash() {
+    var hash = window.location.hash || "";
+    if (hash.length < 2) return null;
+
+    var raw = hash.substring(1);
+    try {
+      raw = decodeURIComponent(raw);
+    } catch (e) {
+      // If a client supplied an already-decoded fragment, still try JSON.
+    }
+
+    try {
+      return JSON.parse(raw);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function handleMessage() {
+    var message = readMessageFromHash();
+    if (!message || typeof message !== "object") return;
+
+    var id = message.id;
+    if (typeof id !== "string" || !id || id.length > 180) return;
+    if (id === lastHandledId) return;
+    lastHandledId = id;
+
+    // Refuse keys other than our dedicated key so that this page cannot
+    // accidentally read or overwrite QoL's qollock_settings.
+    if (message.key !== STORAGE_KEY) {
+      respond(id, false, undefined, "Storage key is not allowed");
+      return;
+    }
+
+    try {
+      if (message.cmd === "save") {
+        if (typeof message.value !== "string") {
+          respond(id, false, undefined, "Save value must be a string");
+          return;
+        }
+        if (message.value.length > MAX_VALUE_LENGTH) {
+          respond(id, false, undefined, "Save value is too large");
+          return;
+        }
+
+        // Validate that the value is JSON before saving it.
+        JSON.parse(message.value);
+        window.localStorage.setItem(STORAGE_KEY, message.value);
+        respond(id, true, true);
+        return;
+      }
+
+      if (message.cmd === "load") {
+        var value = window.localStorage.getItem(STORAGE_KEY);
+        respond(id, true, value === null ? null : value);
+        return;
+      }
+
+      if (message.cmd === "remove") {
+        window.localStorage.removeItem(STORAGE_KEY);
+        respond(id, true, true);
+        return;
+      }
+
+      respond(id, false, undefined, "Unknown command");
+    } catch (e) {
+      respond(id, false, undefined, e && e.message ? e.message : e);
+    }
+  }
+
+  // Signal readiness first and process the fragment after a short delay so
+  // the Panorama side has time to receive the ready title event.
+  function announceReady() {
+    setTitle(READY_TITLE);
+    window.setTimeout(handleMessage, 80);
+  }
+
+  window.addEventListener("hashchange", function () {
+    window.setTimeout(handleMessage, 0);
+  });
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", announceReady, { once: true });
+  } else {
+    announceReady();
+  }
+})();
+</script>
+</body>
+</html>
