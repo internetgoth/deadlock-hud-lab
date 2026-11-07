@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; connect-src https://rtbxmxwsopbeuepcvnnb.supabase.co; base-uri 'none'; form-action 'none'">
+<title>HUDLAB_LIC_INIT</title></head><body><script src="config.js"></script><script>
+"use strict";
+(function () {
+  var didAnswer = false;
+  function answer(id, ok) {
+    if (didAnswer) return;
+    didAnswer = true;
+    document.title = (ok ? "HUDLAB_LIC_OK:" : "HUDLAB_LIC_DENY:") + id;
+  }
+  var req;
+  try { req = JSON.parse(decodeURIComponent(location.hash.slice(1))); }
+  catch (_) { answer("invalid", false); return; }
+  if (!req || typeof req.id !== "string" || !/^\d{1,24}$/.test(req.id) ||
+      typeof req.ticket !== "string" || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(req.ticket) ||
+      req.ticket.length > 900) { answer("invalid", false); return; }
+  var ticket = req.ticket, id = req.id;
+  // Never persist or log ticket. Clear hash from the page address bar.
+  try { history.replaceState(null, "", location.pathname + location.search); } catch (_) {}
+  var config = window.HUDLAB_CONFIG || {};
+  if (!config.publishableKey || !config.supabaseUrl) { answer(id, false); return; }
+  var controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  var abort = controller && setTimeout(function(){controller.abort();}, 12000);
+  fetch(config.supabaseUrl.replace(/\/$/, "") + "/functions/v1/hudlab-auth", {
+    method: "POST", mode: "cors", cache: "no-store", referrerPolicy: "no-referrer",
+    headers: { "Content-Type": "application/json", "apikey": config.publishableKey },
+    body: JSON.stringify({ action: "license_redeem", ticket: ticket }),
+    signal: controller ? controller.signal : undefined
+  }).then(function (res) { return res.ok ? res.json() : null; })
+    .then(function (data) { answer(id, !!(data && data.allowed === true)); })
+    .catch(function () { answer(id, false); })
+    .finally(function () { if (abort) clearTimeout(abort); });
+})();
+</script></body></html>
